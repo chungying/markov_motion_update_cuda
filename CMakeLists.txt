@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 find_package(CUDA 8.0 )
 SET (CUDA_ENABLE ON CACHE BOOL "enable NVCC compiler")
+message(STATUS "CUDA_ENABLE is ${CUDA_ENABLE}")
 SET (CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets CACHE STRING "suppress deprecated warnings" FORCE)
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -42,10 +43,13 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${CUDA_INCLUDE_DIRS}
 )
 
+add_definitions(-DCUDA_ENABLE)
 ## Declare a C++ library
-cuda_add_library(markov_motion_update_cuda
+#cuda_add_library(markov_motion_update_cuda
+cuda_add_executable(markov_motion_update_cuda
   src/markov_motion_update/motion_update.cu
 )
 
@@ -70,9 +74,11 @@ cuda_add_library(markov_motion_update_cuda
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(markov_motion_update_cuda
+  ${catkin_LIBRARIES}
+  ${CUDA_LIBRARIES}
+  ${CUDA_CUBLAS_LIBRARIES}
+)
 
 #############
 ## Install ##
