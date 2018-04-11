@@ -6,6 +6,33 @@
 #define IDX2G(a,x,y,d2,d3) (((a)*(d2)*(d3))+(IDX2M(x,y,d3)))
 #define IDX2Q(opa,a,x,y,d2,d3,d4) (((opa)*(d2)*(d3)*(d4))+(a)*(d3)*(d4)+(x)*(d4)+(y))
 
+void arrangeNgbVec(double*& pre_w, double*& ngb_pre_w_vec, int map_a, int map_x, int map_y, int mask_side, int pidx_x, int pidx_y)
+{
+  //get ngb_pre_w_vec for the current position
+  for(int mask_a = 0; mask_a < map_a ; mask_a++)
+  {
+    for(int mask_x = 0 ; mask_x < mask_side ; mask_x++)
+    {
+      for(int mask_y = 0; mask_y < mask_side ; mask_y++)
+      {
+        int ngb_pidx_x = pidx_x - (mask_side-1)/2 + mask_x;
+        int ngb_pidx_y = pidx_y - (mask_side-1)/2 + mask_y;
+        int ngb_pidx_a = mask_a;
+        int ngb_pidx = IDX2G(ngb_pidx_a, ngb_pidx_x, ngb_pidx_y, map_x, map_y);
+        int ngb_pre_w_vec_idx = IDX2G(mask_a,mask_x,mask_y,mask_side,mask_side);
+        if(ngb_pre_w_vec_idx < 0 || ngb_pre_w_vec_idx > mask_side*mask_side*map_a)
+          printf("wrong ngb_pre_w_vec_idx %d from %d %d %d\n",ngb_pre_w_vec_idx, mask_a, mask_x, mask_y);
+        if(ngb_pidx_x < 0 || ngb_pidx_x > map_x || 
+           ngb_pidx_y < 0 || ngb_pidx_y > map_y || 
+           ngb_pidx_a < 0 || ngb_pidx_a > map_a)
+          ngb_pre_w_vec[ngb_pre_w_vec_idx] = 0.0;
+        else
+          ngb_pre_w_vec[ngb_pre_w_vec_idx] = pre_w[ngb_pidx];
+      }
+    }
+  }
+}
+
 double CPUdot(double*& A, double*& B, int size)
 {
   double product = 0.0;
@@ -64,6 +91,7 @@ int cublasFunc(void)
   double* pre_w = 0;//previous weight vector, map_a*map_x*map_y
   double* cur_w = 0;//previous weight vector, map_a*map_x*map_y
   double* single_w = 0;
+  printf("allocated %f MB for pre_w\n",1.0*map_x*map_y*map_a*sizeof(*pre_w)/1024/1024);
   pre_w = (double *)malloc( map_x*map_y*map_a*sizeof(*pre_w));
   cur_w = (double *)malloc( map_x*map_y*map_a*sizeof(*cur_w));
   single_w = (double *)malloc( sizeof(*single_w));
@@ -78,7 +106,7 @@ int cublasFunc(void)
     for (j = 0; j < map_y; j++)
       for (i = 0; i < map_x; i++)
       {
-        pre_w[IDX2G(k,i,j,map_x,map_y)] = (double)IDX2G(k,i,j,map_x,map_y);
+        pre_w[IDX2G(k,i,j,map_x,map_y)] = 1;
         cur_w[IDX2G(k,i,j,map_x,map_y)] = 0;
       }
   //printf("pre_w\n");
@@ -103,7 +131,10 @@ int cublasFunc(void)
   double* mask_w_mat_dev;//mask weight matrix, map_a by map_a*mask_side*mask_side
   double* ngb_pre_w_vec_dev;//neighbors' previous weight vector, map_a*mask_side*mask_side
   double* cur_w_dev = 0;
+
+  printf("origin mem info\n");
   showMemInfo();
+
   cudaStat = cudaMalloc ((void **)(&mask_w_mat_dev), mask_w_mat_size*sizeof(*mask_w_mat));
   total_mem_allocated += mask_w_mat_size*sizeof(*mask_w_mat);
   if (cudaStat != cudaSuccess)
@@ -112,6 +143,9 @@ int cublasFunc(void)
       cudaFree (mask_w_mat_dev);
       return EXIT_FAILURE;
   }
+  printf("mem info after mask_w_mat_dev, expected mem: %f MB\n",(1.0*mask_w_mat_size*sizeof(*mask_w_mat)/1024/1024));
+  showMemInfo();
+
   cudaStat = cudaMalloc ((void **)(&ngb_pre_w_vec_dev), ngb_pre_w_vec_size*sizeof(*ngb_pre_w_vec));
   total_mem_allocated += ngb_pre_w_vec_size*sizeof(*ngb_pre_w_vec);
   if (cudaStat != cudaSuccess)
@@ -120,6 +154,9 @@ int cublasFunc(void)
       cudaFree (ngb_pre_w_vec_dev);
       return EXIT_FAILURE;
   }
+  printf("mem info after ngb_pre_w_vec_dev, expected mem: %f MB\n",(1.0*ngb_pre_w_vec_size*sizeof(*ngb_pre_w_vec)/1024/1024));
+  showMemInfo();
+
   cudaStat = cudaMalloc ((void **)(&cur_w_dev), map_x*map_y*map_a*sizeof(*cur_w));
   total_mem_allocated += map_x*map_y*map_a*sizeof(*cur_w);
   if (cudaStat != cudaSuccess)
@@ -128,7 +165,11 @@ int cublasFunc(void)
       cudaFree (cur_w_dev);
       return EXIT_FAILURE;
   }
-  printf("allocated %d Byte of GPU memory\n",total_mem_allocated);
+  printf("mem info after cur_w_dev, expected mem: %f MB\n",(1.0*map_x*map_y*map_a*sizeof(*cur_w)/1024/1024));
+  showMemInfo();
+
+  printf("allocated %f MB of GPU memory\n",((double)total_mem_allocated/1024/1024));
+
   //cublas
   stat = cublasCreate(&handle);
   if (stat != CUBLAS_STATUS_SUCCESS)
@@ -171,7 +212,7 @@ int cublasFunc(void)
   //printf ("mask_w_mat_dev upload succeed\nprint mask_w_mat again\n");
   //printMaskWMat(mask_w_mat, mask_side, map_a);
   int particle_count = 0;
-  int runs = 100;
+  int runs = 1000;
   for(int pidx_x = 0; pidx_x < map_x; pidx_x++)
   for(int pidx_y = 0; pidx_y < map_y; pidx_y++)
   for(int pidx_a = 0; pidx_a < map_a; pidx_a++)
@@ -185,39 +226,10 @@ int cublasFunc(void)
     particle_count++;
     //For each particle
     int pidx = IDX2G(pidx_a, pidx_x, pidx_y, map_x, map_y);
-    //TODO get ngb_pre_w_vec with active position
-    //TODO cp ngb_pre_w_vec to device
-    for(int mask_a = 0; mask_a < map_a ; mask_a++)
-    {
-      for(int mask_x = 0 ; mask_x < mask_side ; mask_x++)
-      {
-        for(int mask_y = 0; mask_y < mask_side ; mask_y++)
-        {
-          int ngb_pidx_x = pidx_x - (mask_side-1)/2 + mask_x;
-          int ngb_pidx_y = pidx_y - (mask_side-1)/2 + mask_y;
-          int ngb_pidx_a = mask_a;
-          int ngb_pidx = IDX2G(ngb_pidx_a, ngb_pidx_x, ngb_pidx_y, map_x, map_y);
-          int ngb_pre_w_vec_idx = IDX2G(mask_a,mask_x,mask_y,mask_side,mask_side);
-          if(ngb_pre_w_vec_idx < 0 || ngb_pre_w_vec_idx > mask_side*mask_side*map_a)
-            printf("wrong ngb_pre_w_vec_idx %d from %d %d %d\n",ngb_pre_w_vec_idx, mask_a, mask_x, mask_y);
-          //printf("(%d, %d, %d)=%d->%d",mask_x,mask_y,mask_a,ngb_pre_w_vec_idx,ngb_pidx);
-          if(ngb_pidx_x < 0 || ngb_pidx_x > map_x || 
-             ngb_pidx_y < 0 || ngb_pidx_y > map_y || 
-             ngb_pidx_a < 0 || ngb_pidx_a > map_a)
-          {
-            //printf(" skipped \n");
-            ngb_pre_w_vec[ngb_pre_w_vec_idx] = 0.0;
-          }
-          else
-          {
-            //printf("\n");
-            ngb_pre_w_vec[ngb_pre_w_vec_idx] = pre_w[ngb_pidx];
-            //printf(" = %f, %f\n",ngb_pre_w_vec[ngb_pre_w_vec_idx], pre_w[ngb_pidx]);
-          }
-        }
-      }
-    }
-    //printf("setting ngb_pre_w_vec\n");
+    //get ngb_pre_w_vec for the current position
+    arrangeNgbVec(pre_w, ngb_pre_w_vec, map_a, map_x, map_y, mask_side, pidx_x, pidx_y);
+
+    //cp ngb_pre_w_vec to device
     ros::Time cuda11 = ros::Time::now();
     stat = cublasSetVector(ngb_pre_w_vec_size , sizeof(*ngb_pre_w_vec), ngb_pre_w_vec, 1, ngb_pre_w_vec_dev, 1);
     ros::Time cuda12 = ros::Time::now();
@@ -265,9 +277,7 @@ int cublasFunc(void)
       printf("upload mask_w_mat_dev+origin_particle_angle_idx failed\n");
       return EXIT_FAILURE;
     }
-    ros::Time cuda31 = ros::Time::now();
     stat = cublasGetVector(1 , sizeof(*single_w), (cur_w_dev+pidx), 1, single_w, 1);
-    ros::Time cuda32 = ros::Time::now();
     if (stat != CUBLAS_STATUS_SUCCESS)
     {
       printf("upload  failed\n");
@@ -291,24 +301,26 @@ int cublasFunc(void)
     //  printf("results from CPU and GPU are the same\n");
     int cuda1 = (cuda12 - cuda11).toNSec();
     int cuda2 = (cuda22 - cuda21).toNSec();
-    int cuda3 = (cuda32 - cuda31).toNSec();
-    int cudaall = (cuda1 + cuda2 + cuda3);
+    //int cudaall = (cuda1 + cuda2 + cuda3);
+    int cudaall = (cuda1 + cuda2);
     int cpu = (cpu12 - cpu11).toNSec();
     vec_cuda1.push_back(cuda1);
     vec_cuda2.push_back(cuda2);
-    vec_cuda3.push_back(cuda3);
     vec_cudaall.push_back(cudaall);
     vec_cpu.push_back(cpu);
     //printf("GPU times: %ld + %ld + %ld = %ld\n", cuda1, cuda2, cuda3, cudaall);
     //printf("CPU dot time: %ld\n", cpu);
   }
+  ros::Time cuda31 = ros::Time::now();
   //printf("original cur_w\n");
   //printWG(cur_w, map_x, map_y, map_a);
   cublasGetVector(map_x*map_y*map_a, sizeof(*cur_w_dev), cur_w_dev, 1, cur_w, 1);
   //printf("cur_w\n");
   //printWG(cur_w, map_x, map_y, map_a);
+  ros::Time cuda32 = ros::Time::now();
+  int cuda3 = (cuda32 - cuda31).toNSec();
+  vec_cuda3.push_back(cuda3);
 
-  printf("size of computation: %ld\n", vec_cpu.size());
   printf("printing GPU mem info\n");
   showMemInfo();
   cudaFree (mask_w_mat_dev);
@@ -320,11 +332,23 @@ int cublasFunc(void)
   free(ngb_pre_w_vec);
   printf("printing GPU mem info after releasing\n");
   showMemInfo();
-  printf("cuda 1 avg time  : %f ns\n", 1.0*std::accumulate(vec_cuda1.begin(), vec_cuda1.end(), 0)/vec_cuda1.size());
-  printf("cuda 2 avg time  : %f ns\n", 1.0*std::accumulate(vec_cuda2.begin(), vec_cuda2.end(), 0)/vec_cuda2.size());
-  printf("cuda 3 avg time  : %f ns\n", 1.0*std::accumulate(vec_cuda3.begin(), vec_cuda3.end(), 0)/vec_cuda3.size());
-  printf("cuda all avg time: %f ns\n", 1.0*std::accumulate(vec_cudaall.begin(), vec_cudaall.end(), 0)/vec_cudaall.size());
-  printf("cpu avg time     : %f ns\n", 1.0*std::accumulate(vec_cpu.begin(), vec_cpu.end(), 0)/vec_cpu.size());
+  int all_cuda1 = std::accumulate(vec_cuda1.begin(), vec_cuda1.end(), 0);
+  int all_cuda2 = std::accumulate(vec_cuda2.begin(), vec_cuda2.end(), 0);
+  int all_cuda3 = std::accumulate(vec_cuda3.begin(), vec_cuda3.end(), 0);
+  int all_cudaall = std::accumulate(vec_cudaall.begin(), vec_cudaall.end(), 0);
+  int all_cpu = std::accumulate(vec_cpu.begin(), vec_cpu.end(), 0);
+  double avg_cuda1 = 1.0*std::accumulate(vec_cuda1.begin(), vec_cuda1.end(), 0)/vec_cuda1.size();
+  double avg_cuda2 = 1.0*std::accumulate(vec_cuda2.begin(), vec_cuda2.end(), 0)/vec_cuda2.size();
+  double avg_cuda3 = 1.0*std::accumulate(vec_cuda3.begin(), vec_cuda3.end(), 0)/vec_cuda3.size();
+  double avg_cudaall = 1.0*std::accumulate(vec_cudaall.begin(), vec_cudaall.end(), 0)/vec_cudaall.size();
+  double avg_cpu = 1.0*std::accumulate(vec_cpu.begin(), vec_cpu.end(), 0)/vec_cpu.size();
+  printf("size of computation: %ld\n", vec_cpu.size());
+  printf("cuda 1 time  : %f ns, overall: %d\n", avg_cuda1  , all_cuda1);
+  printf("cuda 2 time  : %f ns, overall: %d\n", avg_cuda2  , all_cuda2);
+  printf("cuda 3 time  : %f ns, overall: %d\n", avg_cuda3  , all_cuda3);
+  printf("cudaall time : %f ns, overall: %d\n", avg_cudaall, all_cudaall);
+  printf("cpu time     : %f ns, overall: %d\n", avg_cpu    , all_cpu);
+  printf("gpu speedup %f times\n",avg_cpu/avg_cudaall);
   return EXIT_SUCCESS;
 }
 
