@@ -9,6 +9,7 @@ project(markov_motion_update_cuda)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   amcl_modified
+  roscpp
 )
 find_package(CUDA 8.0 )
 SET (CUDA_ENABLE ON CACHE BOOL "enable NVCC compiler")
