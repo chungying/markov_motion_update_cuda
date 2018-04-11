@@ -3,6 +3,24 @@
 #define IDX2G(a,x,y,d2,d3) (((a)*(d2)*(d3))+(IDX2M(x,y,d3)))
 #define IDX2Q(opa,a,x,y,d2,d3,d4) (((opa)*(d2)*(d3)*(d4))+(a)*(d3)*(d4)+(x)*(d4)+(y))
 
+double CPUdot(double*& A, double*& B, int size)
+{
+  double product = 0.0;
+  for(int i = 0 ; i < size ; ++i)
+    product += A[i] * B[i];
+  return product;
+}
+
+int check(double*& vec, double*& bak, int size)
+{
+  for(int i = 0 ; i < size ; ++i)
+  {
+    if(vec[i] != bak[i])
+      return 1;
+  }
+  return 0;
+}
+
 void showMemInfo()
 {
         // show memory usage of GPU
@@ -35,8 +53,11 @@ int cublasFunc(void)
   //prerequisite
   double* pre_w = 0;//previous weight vector, map_a*map_x*map_y
   double* cur_w = 0;//previous weight vector, map_a*map_x*map_y
+  double* single_w = 0;
   pre_w = (double *)malloc( map_x*map_y*map_a*sizeof(*pre_w));
   cur_w = (double *)malloc( map_x*map_y*map_a*sizeof(*cur_w));
+  single_w = (double *)malloc( sizeof(*single_w));
+  *single_w = 0;
   if(!pre_w || !cur_w)
   {
     printf("host memory allocation failed\n");
@@ -60,7 +81,13 @@ int cublasFunc(void)
   if(allocateMaskWMat(mask_w_mat, mask_side, map_a, mask_w_mat_size)!=0)
     return EXIT_FAILURE;
   double* ngb_pre_w_vec = 0;
+  double* ngb_pre_w_vec_bak = 0;
+  double* mask_w_vec_bak = 0;
   if(allocateNgbPreWVec(ngb_pre_w_vec, mask_side, map_a, ngb_pre_w_vec_size)!=0)
+    return EXIT_FAILURE;
+  if(allocateNgbPreWVec(ngb_pre_w_vec_bak, mask_side, map_a, ngb_pre_w_vec_size)!=0)
+    return EXIT_FAILURE;
+  if(allocateNgbPreWVec(mask_w_vec_bak, mask_side, map_a, ngb_pre_w_vec_size)!=0)
     return EXIT_FAILURE;
   //device memory pointer
   double* mask_w_mat_dev;//mask weight matrix, map_a by map_a*mask_side*mask_side
@@ -169,10 +196,8 @@ int cublasFunc(void)
       }
     }
     printf("setting ngb_pre_w_vec\n");
-    stat = cublasSetVector (ngb_pre_w_vec_size , sizeof(*ngb_pre_w_vec), ngb_pre_w_vec, 1, ngb_pre_w_vec_dev, 1);
-    //cudaStat = cudaMemcpy(ngb_pre_w_vec_dev, ngb_pre_w_vec, ngb_pre_w_vec_size, cudaMemcpyHostToDevice);
+    stat = cublasSetVector(ngb_pre_w_vec_size , sizeof(*ngb_pre_w_vec), ngb_pre_w_vec, 1, ngb_pre_w_vec_dev, 1);
     if (stat != CUBLAS_STATUS_SUCCESS)
-    //if (cudaStat != cudaSuccess)
     {
       printf ("ngb_pre_w_vec data download failed\n");
       cudaFree (ngb_pre_w_vec_dev);
@@ -181,16 +206,60 @@ int cublasFunc(void)
       cublasDestroy(handle);
       return EXIT_FAILURE;
     }
-    printNgbPreWVec(ngb_pre_w_vec, mask_side, map_a);
+    stat = cublasGetVector(ngb_pre_w_vec_size , sizeof(*ngb_pre_w_vec_bak), ngb_pre_w_vec_dev, 1, ngb_pre_w_vec_bak, 1);
+    if (stat != CUBLAS_STATUS_SUCCESS)
+    {
+      printf ("ngb_pre_w_vec_bak data upload failed\n");
+      return EXIT_FAILURE;
+    }
+    if(check(ngb_pre_w_vec, ngb_pre_w_vec_bak, ngb_pre_w_vec_size) != 0)
+    {
+      printNgbPreWVec(ngb_pre_w_vec, mask_side, map_a);
+      printNgbPreWVec(ngb_pre_w_vec_bak, mask_side, map_a);
+      printf("ngb_pre_w_vec and ngb_pre_w_vec_bak are not the same");
+      return EXIT_FAILURE;
+    }
     printf ("ngb_pre_w_vec data download succeed\n");
-    //TODO get origin_particle_angle_idx
+    //get origin_particle_angle_idx
     int origin_particle_angle_idx = ((pidx+1)%map_a)*ngb_pre_w_vec_size;//assume this value instead of ANG2IDX(sample[pidx].v[2])
-    //TODO cur_w_dev[pidx] = cublasDDot(mask_w_mat_dev[origin_particle_angle_idx], ngb_pre_w_vec)
     printf("executing cublasDdot\n");
-    printf("%p, %p+%d/%d ,%p+%d\n", ngb_pre_w_vec_dev, mask_w_mat_dev,origin_particle_angle_idx, mask_w_mat_size,cur_w_dev,pidx);
+    /* A*B=W
+    ngb_pre_w_vec_dev        : A vector 
+    mask_w_mat_dev           : a matrix consisting of all B vectors, where the number of B vectors is 
+    mask_w_mat_size          : the number of all elements in the matrix
+    origin_particle_angle_idx: the index of each B vector in the matrix
+    cur_w_dev                : an array for storing a sequence of W
+    pidx                     : the index of cur_w_dev indicating which position should be used for storing a result W
+    */
     cublasDdot(handle, ngb_pre_w_vec_size, ngb_pre_w_vec_dev, 1, (mask_w_mat_dev+origin_particle_angle_idx), 1, (cur_w_dev+pidx));
-    //TODO what happened here
-    //cublasDdot(handle, ngb_pre_w_vec_size, ngb_pre_w_vec_dev, 1, mask_w_mat_dev, 1, cur_w_dev);
+
+    //printf("print vector A\n");
+    //printNgbPreWVec(ngb_pre_w_vec_bak, mask_side, map_a);
+    //vector B
+    stat = cublasGetVector(ngb_pre_w_vec_size , sizeof(*mask_w_vec_bak), (mask_w_mat_dev+origin_particle_angle_idx), 1, mask_w_vec_bak, 1);
+    if (stat != CUBLAS_STATUS_SUCCESS)
+    {
+      printf("upload mask_w_mat_dev+origin_particle_angle_idx failed\n");
+      return EXIT_FAILURE;
+    }
+    //printf("print vector B\n");
+    //printNgbPreWVec(mask_w_vec_bak, mask_side, map_a);
+    stat = cublasGetVector(1 , sizeof(*single_w), (cur_w_dev+pidx), 1, single_w, 1);
+    if (stat != CUBLAS_STATUS_SUCCESS)
+    {
+      printf("upload  failed\n");
+      return EXIT_FAILURE;
+    }
+    double cpu_w = CPUdot( ngb_pre_w_vec_bak, mask_w_vec_bak, ngb_pre_w_vec_size);
+    if(cpu_w != *single_w)
+    {
+      printf("result W from GPU is %f\n",*single_w);
+      printf("result W from CPU is %f\n", cpu_w);
+      printf("results from CPU and GPU are not the same\n");
+      return EXIT_FAILURE;
+    }
+    else
+      printf("results from CPU and GPU are the same\n");
     printf("cublasDdot ended\n");
   }
   printf("original cur_w\n");
