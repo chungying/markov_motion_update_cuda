@@ -22,11 +22,6 @@ static __inline__ void modify (
   printf("cublasDdot ended\n");
 }
 
-int allocateNgbPreWVec(double*& ngb_pre_w_vec, int mask_side, int map_a, size_t total_size);
-int allocateMaskWMat(double*& mask_w_mat, int mask_side, int map_a, size_t total_size);
-int allocatePreW(double*& pre_w, int map_x, int map_y, int map_a);
-void printMaskWMat(double* mask_w_mat, int mask_side, int map_a);
-void printWG(double* pre_w, int map_x, int map_y, int map_a);
 void showMemInfo()
 {
         // show memory usage of GPU
@@ -47,7 +42,7 @@ void showMemInfo()
   printf("GPU memory usage: used = %f, free = %f MB, total = %f MB\n", used_db/1024.0/1024.0, free_db/1024.0/1024.0, total_db/1024.0/1024.0);
 }
 
-int main(void)
+int cublasFunc(void)
 {
   cudaError_t cudaStat;
   cublasStatus_t stat;

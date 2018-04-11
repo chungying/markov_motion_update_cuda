@@ -48,9 +48,14 @@ include_directories(
 
 add_definitions(-DCUDA_ENABLE)
 ## Declare a C++ library
-#cuda_add_library(markov_motion_update_cuda
-cuda_add_executable(markov_motion_update_cuda
+cuda_add_library(markov_motion_update_cuda
+#cuda_add_executable(markov_motion_update_cuda
   src/markov_motion_update/motion_update.cu
+)
+target_link_libraries(markov_motion_update_cuda
+  ${catkin_LIBRARIES}
+  ${CUDA_LIBRARIES}
+  ${CUDA_CUBLAS_LIBRARIES}
 )
 
 ## Add cmake target dependencies of the library
@@ -61,7 +66,15 @@ cuda_add_executable(markov_motion_update_cuda
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/markov_motion_update_node.cpp)
+add_executable(main 
+  src/main.cpp
+)
+target_link_libraries(main
+  ${catkin_LIBRARIES}
+  ${CUDA_LIBRARIES}
+  ${CUDA_CUBLAS_LIBRARIES}
+  markov_motion_update_cuda
+)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -73,12 +86,6 @@ cuda_add_executable(markov_motion_update_cuda
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-## Specify libraries to link a library or executable target against
-target_link_libraries(markov_motion_update_cuda
-  ${catkin_LIBRARIES}
-  ${CUDA_LIBRARIES}
-  ${CUDA_CUBLAS_LIBRARIES}
-)
 
 #############
 ## Install ##
