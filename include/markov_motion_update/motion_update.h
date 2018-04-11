@@ -21,6 +21,7 @@
 
 #endif
 
+void printNgbPreWVec(double*& ngb_pre_w_vec, int mask_side, int map_a);
 int allocateNgbPreWVec(double*& ngb_pre_w_vec, int mask_side, int map_a, size_t total_size);
 int allocateMaskWMat(double*& mask_w_mat, int mask_side, int map_a, size_t total_size);
 int allocatePreW(double*& pre_w, int map_x, int map_y, int map_a);
